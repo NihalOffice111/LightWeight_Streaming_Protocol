@@ -320,3 +320,6 @@ int main() {
     audioThread.join();
     return 0;
 }
+
+
+//g++ client.cpp -o client -lopencv_core -lopencv_imgproc -lopencv_highgui -lopencv_videoio -lasound

@@ -307,6 +307,186 @@
 
 
 // Video and Audio Streaming using RTP
+// #include <iostream>
+// #include <fstream>
+// #include <fcntl.h>
+// #include <unistd.h>
+// #include <cstring>
+// #include <sys/ioctl.h>
+// #include <sys/mman.h>
+// #include <netinet/in.h>
+// #include <arpa/inet.h>
+// #include <thread>
+// #include <vector>
+// #include <linux/videodev2.h>
+// #include <alsa/asoundlib.h>
+
+// #define VIDEO_PORT 5000
+// #define AUDIO_PORT 5002
+// #define AUDIO_DEVICE "default"
+// #define SAMPLE_RATE 44100
+// #define CHANNELS 1
+// #define AUDIO_BUFFER_SIZE 4096
+// #define RTP_HEADER_SIZE 12
+
+// // RTP header structure
+// struct RTPHeader {
+//     uint8_t version:2;
+//     uint8_t padding:1;
+//     uint8_t extension:1;
+//     uint8_t csrcCount:4;
+//     uint8_t marker:1;
+//     uint8_t payloadType:7;
+//     uint16_t sequenceNumber;
+//     uint32_t timestamp;
+//     uint32_t ssrc;
+// };
+
+// // Create RTP header
+// void createRTPHeader(RTPHeader& header, uint32_t ts, uint16_t seqNum, uint8_t payloadType) {
+//     header.version = 2;
+//     header.padding = 0;
+//     header.extension = 0;
+//     header.csrcCount = 0;
+//     header.marker = 0;
+//     header.payloadType = payloadType;
+//     header.sequenceNumber = htons(seqNum);
+//     header.timestamp = htonl(ts);
+//     header.ssrc = htonl(1234);
+// }
+
+// // V4L2 buffer structure
+// struct Buffer {
+//     void* start;
+//     size_t length;
+// };
+
+// // MJPEG video streaming
+// void videoStreaming(const std::string& ip) {
+//     int fd = open("/dev/video0", O_RDWR);
+//     if (fd < 0) {
+//         perror("Failed to open video device");
+//         return;
+//     }
+
+//     // Set format to MJPEG
+//     v4l2_format fmt{};
+//     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+//     fmt.fmt.pix.width = 640;
+//     fmt.fmt.pix.height = 480;
+//     fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUV420;
+//     fmt.fmt.pix.field = V4L2_FIELD_NONE;
+//     ioctl(fd, VIDIOC_S_FMT, &fmt);
+
+//     // Request buffers
+//     v4l2_requestbuffers req{};
+//     req.count = 4;
+//     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+//     req.memory = V4L2_MEMORY_MMAP;
+//     ioctl(fd, VIDIOC_REQBUFS, &req);
+
+//     std::vector<Buffer> buffers(req.count);
+//     for (int i = 0; i < req.count; ++i) {
+//         v4l2_buffer buf{};
+//         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+//         buf.memory = V4L2_MEMORY_MMAP;
+//         buf.index = i;
+//         ioctl(fd, VIDIOC_QUERYBUF, &buf);
+//         buffers[i].length = buf.length;
+//         buffers[i].start = mmap(nullptr, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, buf.m.offset);
+//         ioctl(fd, VIDIOC_QBUF, &buf);
+//     }
+
+//     v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+//     ioctl(fd, VIDIOC_STREAMON, &type);
+
+//     int sock = socket(AF_INET, SOCK_DGRAM, 0);
+//     sockaddr_in client{};
+//     client.sin_family = AF_INET;
+//     client.sin_port = htons(VIDEO_PORT);
+//     client.sin_addr.s_addr = inet_addr(ip.c_str());
+
+//     uint16_t seq = 0;
+//     uint32_t ts = 0;
+
+//     while (true) {
+//         v4l2_buffer buf{};
+//         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+//         buf.memory = V4L2_MEMORY_MMAP;
+//         ioctl(fd, VIDIOC_DQBUF, &buf);
+
+//         uint8_t* jpegData = static_cast<uint8_t*>(buffers[buf.index].start);
+//         size_t jpegSize = buf.bytesused;
+
+//         std::vector<uint8_t> packet(RTP_HEADER_SIZE + jpegSize);
+//         RTPHeader hdr;
+//         createRTPHeader(hdr, ts, seq++, 96);
+//         memcpy(packet.data(), &hdr, RTP_HEADER_SIZE);
+//         memcpy(packet.data() + RTP_HEADER_SIZE, jpegData, jpegSize);
+
+//         sendto(sock, packet.data(), packet.size(), 0, (sockaddr*)&client, sizeof(client));
+//         std::cout << "[Video] Sent frame: Size = " << jpegSize << " bytes\n";
+
+//         ts += 1000 / 30;  // Simulate 30 fps
+//         usleep(1000000 / 30);
+
+//         ioctl(fd, VIDIOC_QBUF, &buf);
+//     }
+
+//     ioctl(fd, VIDIOC_STREAMOFF, &type);
+//     close(fd);
+//     close(sock);
+// }
+
+// // PCM audio streaming
+// void audioStreaming(const std::string& ip) {
+//     snd_pcm_t *handle;
+//     snd_pcm_open(&handle, AUDIO_DEVICE, SND_PCM_STREAM_CAPTURE, 0);
+//     snd_pcm_set_params(handle, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
+//                        CHANNELS, SAMPLE_RATE, 1, 500000);  // 0.5 sec latency
+
+//     int sock = socket(AF_INET, SOCK_DGRAM, 0);
+//     sockaddr_in client{};
+//     client.sin_family = AF_INET;
+//     client.sin_port = htons(AUDIO_PORT);
+//     client.sin_addr.s_addr = inet_addr(ip.c_str());
+
+//     uint16_t seq = 0;
+//     uint32_t ts = 0;
+
+//     char buffer[AUDIO_BUFFER_SIZE];
+//     while (true) {
+//         snd_pcm_readi(handle, buffer, AUDIO_BUFFER_SIZE / 2);  // 2 bytes per sample
+//         std::vector<uint8_t> packet(RTP_HEADER_SIZE + AUDIO_BUFFER_SIZE);
+//         RTPHeader hdr;
+//         createRTPHeader(hdr, ts, seq++, 97);
+//         memcpy(packet.data(), &hdr, RTP_HEADER_SIZE);
+//         memcpy(packet.data() + RTP_HEADER_SIZE, buffer, AUDIO_BUFFER_SIZE);
+//         sendto(sock, packet.data(), packet.size(), 0, (sockaddr*)&client, sizeof(client));
+
+//         ts += AUDIO_BUFFER_SIZE;
+//         std::cout << "[Audio] Sent " << AUDIO_BUFFER_SIZE << " bytes\n";
+//     }
+
+//     close(sock);
+//     snd_pcm_close(handle);
+// }
+
+// // Entry point
+// int main() {
+//     std::string clientIP = "127.0.0.1";
+
+//     std::thread audioThread(audioStreaming, clientIP);
+//     std::thread videoThread(videoStreaming, clientIP);
+
+//     videoThread.join();
+//     audioThread.join();
+
+//     return 0;
+// }
+
+
+
 #include <iostream>
 #include <fstream>
 #include <fcntl.h>
@@ -320,6 +500,8 @@
 #include <vector>
 #include <linux/videodev2.h>
 #include <alsa/asoundlib.h>
+#include <turbojpeg.h>
+#include <opencv2/opencv.hpp>
 
 #define VIDEO_PORT 5000
 #define AUDIO_PORT 5002
@@ -342,7 +524,6 @@ struct RTPHeader {
     uint32_t ssrc;
 };
 
-// Create RTP header
 void createRTPHeader(RTPHeader& header, uint32_t ts, uint16_t seqNum, uint8_t payloadType) {
     header.version = 2;
     header.padding = 0;
@@ -361,7 +542,7 @@ struct Buffer {
     size_t length;
 };
 
-// MJPEG video streaming
+// YUYV → BGR → JPEG Streaming using TurboJPEG
 void videoStreaming(const std::string& ip) {
     int fd = open("/dev/video0", O_RDWR);
     if (fd < 0) {
@@ -369,12 +550,12 @@ void videoStreaming(const std::string& ip) {
         return;
     }
 
-    // Set format to MJPEG
+    // Set format to YUYV
     v4l2_format fmt{};
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     fmt.fmt.pix.width = 640;
-    fmt.fmt.pix.height = 480;
-    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
+    fmt.fmt.pix.height = 320;
+    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
     ioctl(fd, VIDIOC_S_FMT, &fmt);
 
@@ -409,41 +590,78 @@ void videoStreaming(const std::string& ip) {
     uint16_t seq = 0;
     uint32_t ts = 0;
 
+    //  Initialize TurboJPEG
+    tjhandle tjInstance = tjInitCompress();
+
     while (true) {
         v4l2_buffer buf{};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
         ioctl(fd, VIDIOC_DQBUF, &buf);
 
-        uint8_t* jpegData = static_cast<uint8_t*>(buffers[buf.index].start);
-        size_t jpegSize = buf.bytesused;
+        uint8_t* yuyvData = static_cast<uint8_t*>(buffers[buf.index].start);
+        int width = fmt.fmt.pix.width;
+        int height = fmt.fmt.pix.height;
 
+        //  Convert YUYV to BGR
+        cv::Mat yuyv(height, width, CV_8UC2, yuyvData);
+        cv::Mat bgr;
+        cv::cvtColor(yuyv, bgr, cv::COLOR_YUV2BGR_YUYV);
+
+        //  Compress BGR to JPEG
+        unsigned char* jpegBuf = nullptr;
+        unsigned long jpegSize = 0;
+        int jpegQuality = 80;
+
+        if (tjCompress2(tjInstance, bgr.data, width, 0, height, TJPF_BGR,
+                        &jpegBuf, &jpegSize, TJSAMP_420, jpegQuality, TJFLAG_FASTDCT) < 0) {
+            std::cerr << "TurboJPEG compression failed: " << tjGetErrorStr() << std::endl;
+            ioctl(fd, VIDIOC_QBUF, &buf);
+            continue;
+        }
+
+
+        // SAVING THE ONE FRAME IN THE FILE
+        static bool video_saved = false;
+        if(!video_saved){
+            FILE* f = fopen("frame.jpg" , "wb");
+            if(f){
+                fwrite(jpegBuf,1,jpegSize,f);
+                fclose(f);
+                std::cout<<"[Saved] One video frame saved to frame.jpg\n";
+            }
+            video_saved = true;
+        }
+
+        // RTP packet
         std::vector<uint8_t> packet(RTP_HEADER_SIZE + jpegSize);
         RTPHeader hdr;
         createRTPHeader(hdr, ts, seq++, 96);
         memcpy(packet.data(), &hdr, RTP_HEADER_SIZE);
-        memcpy(packet.data() + RTP_HEADER_SIZE, jpegData, jpegSize);
+        memcpy(packet.data() + RTP_HEADER_SIZE, jpegBuf, jpegSize);
 
         sendto(sock, packet.data(), packet.size(), 0, (sockaddr*)&client, sizeof(client));
-        std::cout << "[Video] Sent frame: Size = " << jpegSize << " bytes\n";
+        std::cout << "[Video] Sent frame (" << jpegSize << " bytes)\n";
 
-        ts += 1000 / 30;  // Simulate 30 fps
-        usleep(1000000 / 30);
+        tjFree(jpegBuf);
+        ts += 1000 / 15;
+        usleep(1000000 / 15);
 
         ioctl(fd, VIDIOC_QBUF, &buf);
     }
 
+    tjDestroy(tjInstance);
     ioctl(fd, VIDIOC_STREAMOFF, &type);
     close(fd);
     close(sock);
 }
 
-// PCM audio streaming
+// PCM Audio streaming stays the same
 void audioStreaming(const std::string& ip) {
     snd_pcm_t *handle;
     snd_pcm_open(&handle, AUDIO_DEVICE, SND_PCM_STREAM_CAPTURE, 0);
     snd_pcm_set_params(handle, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
-                       CHANNELS, SAMPLE_RATE, 1, 500000);  // 0.5 sec latency
+                       CHANNELS, SAMPLE_RATE, 1, 500000);
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     sockaddr_in client{};
@@ -456,14 +674,28 @@ void audioStreaming(const std::string& ip) {
 
     char buffer[AUDIO_BUFFER_SIZE];
     while (true) {
-        snd_pcm_readi(handle, buffer, AUDIO_BUFFER_SIZE / 2);  // 2 bytes per sample
+        snd_pcm_readi(handle, buffer, AUDIO_BUFFER_SIZE / 2);
+        
+        //STORING ONE AUDIO FRAME IN THE FILE
+
+        static bool audio_saved = false;
+        if(!audio_saved){
+            FILE* f = fopen("audio.pcm" , "wb");
+            if(f){
+                fwrite(buffer,1,AUDIO_BUFFER_SIZE,f);
+                fclose(f);
+                std::cout<<"[Saved] One audio frame saved to audio.pcm\n";
+            }
+            audio_saved = true;
+        }
+        
+        
         std::vector<uint8_t> packet(RTP_HEADER_SIZE + AUDIO_BUFFER_SIZE);
         RTPHeader hdr;
         createRTPHeader(hdr, ts, seq++, 97);
         memcpy(packet.data(), &hdr, RTP_HEADER_SIZE);
         memcpy(packet.data() + RTP_HEADER_SIZE, buffer, AUDIO_BUFFER_SIZE);
         sendto(sock, packet.data(), packet.size(), 0, (sockaddr*)&client, sizeof(client));
-
         ts += AUDIO_BUFFER_SIZE;
         std::cout << "[Audio] Sent " << AUDIO_BUFFER_SIZE << " bytes\n";
     }
@@ -485,3 +717,6 @@ int main() {
     return 0;
 }
 
+
+
+//g++ streamer.cpp -o streamer -lturbojpeg `pkg-config --cflags --libs opencv4` -lasound -lpthread
