@@ -66,7 +66,7 @@
 //         memcpy(packet.data() + sizeof(FrameHeader), jpeg_buf.data(), jpeg_buf.size());
 
 //         // FIX 2: send packet.data(), not the vector itself
-//         ssize_t sent_bytes = sendto(sock, packet.data(), total_size, 0, 
+//         ssize_t sent_bytes = sendto(sock, packet.data(), total_size, 0,
 //                                     (sockaddr*)&client_addr, sizeof(client_addr));
 
 //         if (sent_bytes < 0) {
@@ -82,7 +82,6 @@
 //     return 0;
 // }
 
-
 // ITS NOT using the RTP header, but rather a custom header.
 
 // #include <iostream>
@@ -91,7 +90,7 @@
 // #include <netinet/in.h>
 // #include <unistd.h>
 // #include <arpa/inet.h>
-// #include <sys/time.h> 
+// #include <sys/time.h>
 // #include <vector>
 
 // // Define the RTP packet header
@@ -191,17 +190,13 @@
 //     return 0;
 // }
 
-
-
-
-
 // #include <iostream>
 // #include <opencv2/opencv.hpp>
 // #include <cstring>
 // #include <netinet/in.h>
 // #include <unistd.h>
 // #include <arpa/inet.h>
-// #include <sys/time.h> 
+// #include <sys/time.h>
 // #include <vector>
 
 // // Define the RTP packet header
@@ -300,11 +295,6 @@
 //     close(sock);
 //     return 0;
 // }
-
-
-
-
-
 
 // Video and Audio Streaming using RTP
 // #include <iostream>
@@ -485,10 +475,7 @@
 //     return 0;
 // }
 
-
-
 #include <iostream>
-#include <fstream>
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstring>
@@ -502,29 +489,32 @@
 #include <alsa/asoundlib.h>
 #include <turbojpeg.h>
 #include <opencv2/opencv.hpp>
+#include <opus/opus.h> // ✅ Opus encoder
 
 #define VIDEO_PORT 5000
 #define AUDIO_PORT 5002
 #define AUDIO_DEVICE "default"
-#define SAMPLE_RATE 44100
+#define SAMPLE_RATE 48000
 #define CHANNELS 1
 #define AUDIO_BUFFER_SIZE 4096
 #define RTP_HEADER_SIZE 12
 
-// RTP header structure
-struct RTPHeader {
-    uint8_t version:2;
-    uint8_t padding:1;
-    uint8_t extension:1;
-    uint8_t csrcCount:4;
-    uint8_t marker:1;
-    uint8_t payloadType:7;
+// RTP header
+struct RTPHeader
+{
+    uint8_t version : 2;
+    uint8_t padding : 1;
+    uint8_t extension : 1;
+    uint8_t csrcCount : 4;
+    uint8_t marker : 1;
+    uint8_t payloadType : 7;
     uint16_t sequenceNumber;
     uint32_t timestamp;
     uint32_t ssrc;
 };
 
-void createRTPHeader(RTPHeader& header, uint32_t ts, uint16_t seqNum, uint8_t payloadType) {
+void createRTPHeader(RTPHeader &header, uint32_t ts, uint16_t seqNum, uint8_t payloadType)
+{
     header.version = 2;
     header.padding = 0;
     header.extension = 0;
@@ -536,21 +526,24 @@ void createRTPHeader(RTPHeader& header, uint32_t ts, uint16_t seqNum, uint8_t pa
     header.ssrc = htonl(1234);
 }
 
-// V4L2 buffer structure
-struct Buffer {
-    void* start;
+struct Buffer
+{
+    void *start;
     size_t length;
 };
 
-// YUYV → BGR → JPEG Streaming using TurboJPEG
-void videoStreaming(const std::string& ip) {
+// ✅ VIDEO THREAD (Same as before)
+void videoStreaming(const std::string &ip)
+{
     int fd = open("/dev/video0", O_RDWR);
-    if (fd < 0) {
-        perror("Failed to open video device");
+    if (fd < 0)
+    {
+        perror("Video device open failed");
         return;
     }
+    std::cout << "[Video] Opened video device /dev/video0\n";
 
-    // Set format to YUYV
+    // Configure V4L2
     v4l2_format fmt{};
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     fmt.fmt.pix.width = 640;
@@ -559,7 +552,6 @@ void videoStreaming(const std::string& ip) {
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
     ioctl(fd, VIDIOC_S_FMT, &fmt);
 
-    // Request buffers
     v4l2_requestbuffers req{};
     req.count = 4;
     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -567,7 +559,8 @@ void videoStreaming(const std::string& ip) {
     ioctl(fd, VIDIOC_REQBUFS, &req);
 
     std::vector<Buffer> buffers(req.count);
-    for (int i = 0; i < req.count; ++i) {
+    for (int i = 0; i < req.count; ++i)
+    {
         v4l2_buffer buf{};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
@@ -589,65 +582,55 @@ void videoStreaming(const std::string& ip) {
 
     uint16_t seq = 0;
     uint32_t ts = 0;
-
-    //  Initialize TurboJPEG
     tjhandle tjInstance = tjInitCompress();
 
-    while (true) {
+    while (true)
+    {
         v4l2_buffer buf{};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
         ioctl(fd, VIDIOC_DQBUF, &buf);
 
-        uint8_t* yuyvData = static_cast<uint8_t*>(buffers[buf.index].start);
+        uint8_t *yuyvData = static_cast<uint8_t *>(buffers[buf.index].start);
         int width = fmt.fmt.pix.width;
         int height = fmt.fmt.pix.height;
 
-        //  Convert YUYV to BGR
         cv::Mat yuyv(height, width, CV_8UC2, yuyvData);
         cv::Mat bgr;
         cv::cvtColor(yuyv, bgr, cv::COLOR_YUV2BGR_YUYV);
 
-        //  Compress BGR to JPEG
-        unsigned char* jpegBuf = nullptr;
+        unsigned char *jpegBuf = nullptr;
         unsigned long jpegSize = 0;
         int jpegQuality = 80;
 
         if (tjCompress2(tjInstance, bgr.data, width, 0, height, TJPF_BGR,
-                        &jpegBuf, &jpegSize, TJSAMP_420, jpegQuality, TJFLAG_FASTDCT) < 0) {
-            std::cerr << "TurboJPEG compression failed: " << tjGetErrorStr() << std::endl;
-            ioctl(fd, VIDIOC_QBUF, &buf);
+                        &jpegBuf, &jpegSize, TJSAMP_420, jpegQuality, TJFLAG_FASTDCT) < 0)
+        {
+            std::cerr << "JPEG compression failed\n";
             continue;
         }
 
-
-        // SAVING THE ONE FRAME IN THE FILE
-        static bool video_saved = false;
-        if(!video_saved){
-            FILE* f = fopen("frame.jpg" , "wb");
-            if(f){
-                fwrite(jpegBuf,1,jpegSize,f);
-                fclose(f);
-                std::cout<<"[Saved] One video frame saved to frame.jpg\n";
-            }
-            video_saved = true;
-        }
-
-        // RTP packet
         std::vector<uint8_t> packet(RTP_HEADER_SIZE + jpegSize);
         RTPHeader hdr;
         createRTPHeader(hdr, ts, seq++, 96);
         memcpy(packet.data(), &hdr, RTP_HEADER_SIZE);
         memcpy(packet.data() + RTP_HEADER_SIZE, jpegBuf, jpegSize);
 
-        sendto(sock, packet.data(), packet.size(), 0, (sockaddr*)&client, sizeof(client));
-        std::cout << "[Video] Sent frame (" << jpegSize << " bytes)\n";
-
+        sendto(sock, packet.data(), packet.size(), 0, (sockaddr *)&client, sizeof(client));
+        std::cout << "[Video] Sent frame: seq=" << seq - 1 << ", timestamp=" << ts
+                  << ", JPEG size=" << jpegSize << " bytes, total packet=" << packet.size() << " bytes\n";
         tjFree(jpegBuf);
-        ts += 1000 / 15;
+        ioctl(fd, VIDIOC_QBUF, &buf);
         usleep(1000000 / 15);
 
-        ioctl(fd, VIDIOC_QBUF, &buf);
+        static int videoFrameCount = 0;
+        videoFrameCount++;
+        if (videoFrameCount % 100 == 0)
+        {
+            std::cout << "[Video] Sent " << videoFrameCount << " frames so far\n";
+        }
+
+        ts += 1000 / 15;
     }
 
     tjDestroy(tjInstance);
@@ -656,8 +639,17 @@ void videoStreaming(const std::string& ip) {
     close(sock);
 }
 
-// PCM Audio streaming stays the same
-void audioStreaming(const std::string& ip) {
+// ✅ AUDIO THREAD — Using Opus
+void audioStreaming(const std::string &ip)
+{
+    int err;
+    OpusEncoder *encoder = opus_encoder_create(SAMPLE_RATE, CHANNELS, OPUS_APPLICATION_AUDIO, &err);
+    if (err != OPUS_OK)
+    {
+        std::cerr << "Opus encoder error: " << opus_strerror(err) << "\n";
+        return;
+    }
+    std::cout << "[Audio] Created Opus encoder: rate=" << SAMPLE_RATE << ", channels=" << CHANNELS << "\n";
     snd_pcm_t *handle;
     snd_pcm_open(&handle, AUDIO_DEVICE, SND_PCM_STREAM_CAPTURE, 0);
     snd_pcm_set_params(handle, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
@@ -669,54 +661,53 @@ void audioStreaming(const std::string& ip) {
     client.sin_port = htons(AUDIO_PORT);
     client.sin_addr.s_addr = inet_addr(ip.c_str());
 
+    const int frame_size = 960;                         // 20ms at 48kHz
+    std::vector<int16_t> buffer(frame_size * CHANNELS); // 16-bit samples
+    unsigned char opusData[4000];
     uint16_t seq = 0;
     uint32_t ts = 0;
 
-    char buffer[AUDIO_BUFFER_SIZE];
-    while (true) {
-        snd_pcm_readi(handle, buffer, AUDIO_BUFFER_SIZE / 2);
-        
-        //STORING ONE AUDIO FRAME IN THE FILE
+    while (true)
+    {
+        // Read exactly frame_size frames (frame_size * CHANNELS * sizeof(int16_t) bytes)
+        snd_pcm_readi(handle, buffer.data(), frame_size);
 
-        static bool audio_saved = false;
-        if(!audio_saved){
-            FILE* f = fopen("audio.pcm" , "wb");
-            if(f){
-                fwrite(buffer,1,AUDIO_BUFFER_SIZE,f);
-                fclose(f);
-                std::cout<<"[Saved] One audio frame saved to audio.pcm\n";
-            }
-            audio_saved = true;
+        int encodedBytes = opus_encode(encoder, buffer.data(), frame_size, opusData, sizeof(opusData));
+        if (encodedBytes < 0)
+        {
+            std::cerr << "Opus encode error: " << opus_strerror(encodedBytes) << "\n";
+            continue;
         }
-        
-        
-        std::vector<uint8_t> packet(RTP_HEADER_SIZE + AUDIO_BUFFER_SIZE);
+
+        std::vector<uint8_t> packet(RTP_HEADER_SIZE + encodedBytes);
         RTPHeader hdr;
         createRTPHeader(hdr, ts, seq++, 97);
         memcpy(packet.data(), &hdr, RTP_HEADER_SIZE);
-        memcpy(packet.data() + RTP_HEADER_SIZE, buffer, AUDIO_BUFFER_SIZE);
-        sendto(sock, packet.data(), packet.size(), 0, (sockaddr*)&client, sizeof(client));
-        ts += AUDIO_BUFFER_SIZE;
-        std::cout << "[Audio] Sent " << AUDIO_BUFFER_SIZE << " bytes\n";
+        memcpy(packet.data() + RTP_HEADER_SIZE, opusData, encodedBytes);
+        sendto(sock, packet.data(), packet.size(), 0, (sockaddr *)&client, sizeof(client));
+        std::cout << "[Audio] Sent frame: seq=" << seq-1 << ", timestamp=" << ts 
+          << ", Opus size=" << encodedBytes << " bytes, total packet=" << packet.size() << " bytes\n";
+        ts += frame_size; // Increment timestamp by number of samples
     }
 
     close(sock);
     snd_pcm_close(handle);
+    opus_encoder_destroy(encoder);
 }
 
-// Entry point
-int main() {
-    std::string clientIP = "127.0.0.1";
-
-    std::thread audioThread(audioStreaming, clientIP);
-    std::thread videoThread(videoStreaming, clientIP);
-
+int main()
+{
+    std::string ip = "127.0.0.1";
+    std::thread videoThread(videoStreaming, ip);
+    std::thread audioThread(audioStreaming, ip);
     videoThread.join();
     audioThread.join();
-
     return 0;
 }
 
 
+//FOR X86
+// g++ streamer.cpp -o streamer -lturbojpeg `pkg-config --cflags --libs opencv4` -lasound -lopus -lpthread
 
-//g++ streamer.cpp -o streamer -lturbojpeg `pkg-config --cflags --libs opencv4` -lasound -lpthread
+// FOR ARM
+//

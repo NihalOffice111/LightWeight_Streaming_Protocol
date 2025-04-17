@@ -249,15 +249,17 @@
 #include <vector>
 #include <arpa/inet.h>
 #include <alsa/asoundlib.h>
+#include <opus/opus.h>  // ✅ Opus decoder
 
 #define VIDEO_PORT 5000
 #define AUDIO_PORT 5002
 #define BUFFER_SIZE 65536
 #define AUDIO_BUFFER_SIZE 4096
 #define AUDIO_DEVICE "default"
-#define SAMPLE_RATE 44100
+#define SAMPLE_RATE 48000
 #define CHANNELS 1
 
+// ✅ VIDEO RECEIVER — Same as before
 void videoReceiver() {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     sockaddr_in addr{};
@@ -271,23 +273,22 @@ void videoReceiver() {
     while (true) {
         ssize_t len = recvfrom(sock, buffer.data(), BUFFER_SIZE, 0, nullptr, nullptr);
         if (len < 12) continue;
+
+        // Skip RTP header
         std::vector<uchar> jpeg(buffer.begin() + 12, buffer.begin() + len);
         cv::Mat frame = cv::imdecode(jpeg, cv::IMREAD_COLOR);
         if (frame.empty()) {
             std::cerr << "Failed to decode JPEG frame\n";
         } else {
-            std::cout << "Decoded frame received\n";
-        }
-        
-        if (!frame.empty()) {
             cv::imshow("Video", frame);
-            if (cv::waitKey(1) == 27) break;
+            if (cv::waitKey(1) == 27) break;  // ESC to exit
         }
     }
 
     close(sock);
 }
 
+// ✅ AUDIO RECEIVER — with Opus decoding
 void audioReceiver() {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     sockaddr_in addr{};
@@ -301,18 +302,37 @@ void audioReceiver() {
     snd_pcm_set_params(handle, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
                        CHANNELS, SAMPLE_RATE, 1, 500000);
 
+    int err;
+    OpusDecoder* decoder = opus_decoder_create(SAMPLE_RATE, CHANNELS, &err);
+    if (err != OPUS_OK) {
+        std::cerr << "Failed to create Opus decoder: " << opus_strerror(err) << "\n";
+        return;
+    }
+    std::cout << "Creating Opus decoder: rate=" << SAMPLE_RATE << ", channels=" << CHANNELS << "\n";
+
     std::vector<uint8_t> buffer(BUFFER_SIZE);
+    std::vector<opus_int16> decodedPcm(2048 * CHANNELS); // Enough for 20ms at 48kHz
 
     while (true) {
         ssize_t len = recvfrom(sock, buffer.data(), BUFFER_SIZE, 0, nullptr, nullptr);
         if (len < 12) continue;
-        snd_pcm_writei(handle, buffer.data() + 12, AUDIO_BUFFER_SIZE / 2);
+
+        unsigned char* opusPayload = buffer.data() + 12;
+        int frameSize = opus_decode(decoder, opusPayload, len - 12, decodedPcm.data(), 2048, 0);
+        if (frameSize < 0) {
+            std::cerr << "Opus decode error: " << opus_strerror(frameSize) << "\n";
+            continue;
+        }
+
+        snd_pcm_writei(handle, decodedPcm.data(), frameSize);
     }
 
     close(sock);
     snd_pcm_close(handle);
+    opus_decoder_destroy(decoder);
 }
 
+// ✅ Main: run both threads
 int main() {
     std::thread videoThread(videoReceiver);
     std::thread audioThread(audioReceiver);
@@ -322,4 +342,6 @@ int main() {
 }
 
 
-//g++ client.cpp -o client -lopencv_core -lopencv_imgproc -lopencv_highgui -lopencv_videoio -lasound
+
+//g++ client.cpp -o client `pkg-config --cflags --libs opencv4` -lopus -lasound -lpthread
+
